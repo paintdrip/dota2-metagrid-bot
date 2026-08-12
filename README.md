@@ -1,4 +1,4 @@
-# 🎮 dota2-metagrid-bot
+# dota2-metagrid-bot
 
 Терминальная утилита для Windows, которая ежедневно скачивает метовую сетку
 героев Dota 2 с [dota2protracker.com/meta-hero-grids](https://dota2protracker.com/meta-hero-grids)
@@ -8,31 +8,31 @@
 <Steam>/userdata/<steam_account_id>/570/remote/cfg/hero_grid_config.json
 ```
 
-✨ Запустил один раз — и в драфте всегда актуальная мета. Сетка на сайте
+Запустил один раз — и в драфте всегда актуальная мета. Сетка на сайте
 обновляется ежедневно, утилита живёт в автозагрузке и делает всё сама.
 
-💚 Источник данных: [dota2protracker.com](https://dota2protracker.com) —
+Источник данных: [dota2protracker.com](https://dota2protracker.com) —
 спасибо авторам сайта за их работу.
 
-## 🚀 Установка
+## Установка
 
-### 📦 Готовый .exe (рекомендуется)
+### Готовый .exe (рекомендуется)
 
-1. ⬇️ Скачайте `dota2-metagrid.exe` из раздела
+1. Скачайте `dota2-metagrid.exe` из раздела
    [Releases](https://github.com/paintdrip/dota2-metagrid-bot/releases).
-2. 📁 Положите его в любую папку, например `C:\Tools\dota2-metagrid\`.
-3. ▶️ Запустите один раз, чтобы проверить работу:
+2. Положите его в любую папку, например `C:\Tools\dota2-metagrid\`.
+3. Запустите один раз, чтобы проверить работу:
    ```
    dota2-metagrid.exe
    ```
-4. ⏰ Добавьте в автозагрузку (Планировщик задач Windows):
+4. Добавьте в автозагрузку (Планировщик задач Windows):
    ```
    dota2-metagrid.exe --install
    ```
 
-Ничего больше устанавливать не нужно — Python не требуется. 🎉
+Ничего больше устанавливать не нужно — Python не требуется.
 
-### 🛠️ Сборка самостоятельно
+### Сборка самостоятельно
 
 Требуется Python 3.10+ и установленный Google Chrome.
 
@@ -51,38 +51,38 @@ pip install -r requirements.txt
 python metagrid.py
 ```
 
-## 🕹️ Использование
+## Использование
 
 ```
-dota2-metagrid.exe                🔄 один прогон обновления с выводом прогресса
-dota2-metagrid.exe --auto         🤫 тихий режим для автозагрузки: пропуск, если
+dota2-metagrid.exe                один прогон обновления с выводом прогресса
+dota2-metagrid.exe --auto         тихий режим для автозагрузки: пропуск, если
                                   сетка обновлялась менее 20 часов назад
-dota2-metagrid.exe --auto --force 💪 игнорировать проверку 20 часов
-dota2-metagrid.exe --dry-run      👀 скачать и распарсить сетку, не трогая конфиг
-dota2-metagrid.exe --install      ⏰ создать задачи в Планировщике (автозагрузка)
-dota2-metagrid.exe --uninstall    🗑️ удалить задачи из Планировщика
-dota2-metagrid.exe --mode matches_wr   🎯 другой режим выбора героев
-dota2-metagrid.exe --steam-path "D:\Steam"   📂 указать Steam вручную
-dota2-metagrid.exe --user-id 123456789      👤 обновить только один аккаунт
-dota2-metagrid.exe --verbose      🔍 подробный вывод
+dota2-metagrid.exe --auto --force игнорировать проверку 20 часов
+dota2-metagrid.exe --dry-run      скачать и распарсить сетку, не трогая конфиг
+dota2-metagrid.exe --install      создать задачи в Планировщике (автозагрузка)
+dota2-metagrid.exe --uninstall    удалить задачи из Планировщика
+dota2-metagrid.exe --mode matches_wr   другой режим выбора героев
+dota2-metagrid.exe --steam-path "D:\Steam"   указать Steam вручную
+dota2-metagrid.exe --user-id 123456789      обновить только один аккаунт
+dota2-metagrid.exe --verbose      подробный вывод
 ```
 
 Коды возврата: `0` — успех (включая пропуск в `--auto`), `1` — ошибка
 (сообщение выводится на русском в stderr).
 
-## ⏰ Автозагрузка
+## Автозагрузка
 
 `--install` создаёт две задачи Планировщика задач Windows:
 
-- 🔑 **Dota2MetaGrid-Logon** — запуск при входе в систему (`--auto`);
-- 📅 **Dota2MetaGrid-Daily** — запуск ежедневно в 12:00 (`--auto`).
+- **Dota2MetaGrid-Logon** — запуск при входе в систему (`--auto`);
+- **Dota2MetaGrid-Daily** — запуск ежедневно в 12:00 (`--auto`).
 
 Обе задачи запускают утилиту с флагом `--auto`: если с момента последнего
 успешного обновления прошло меньше 20 часов, прогон пропускается. Момент
 последнего успеха хранится в `state.json` рядом с exe (либо в
 `%LOCALAPPDATA%\dota2-metagrid\state.json`).
 
-## 📝 Что именно записывается
+## Что именно записывается
 
 Файл `hero_grid_config.json` — это родной формат сетки героев Dota 2:
 
@@ -107,22 +107,22 @@ dota2-metagrid.exe --verbose      🔍 подробный вывод
 }
 ```
 
-🧩 Утилита не конструирует эту структуру сама — она извлекает готовый объект
+Утилита не конструирует эту структуру сама — она извлекает готовый объект
 из данных страницы и записывает его как есть.
 
-👥 Обновляются **все** аккаунты, найденные в `<Steam>/userdata` (если папки
+Обновляются **все** аккаунты, найденные в `<Steam>/userdata` (если папки
 `570/remote/cfg` нет — она создаётся).
 
-💾 Перед первой перезаписью существующего конфига делается backup:
+Перед первой перезаписью существующего конфига делается backup:
 `hero_grid_config_backup.json` (существующий backup не затирается).
 
-🔒 Запись атомарная: временный файл + `os.replace`, повредить конфиг обрывом
+Запись атомарная: временный файл + `os.replace`, повредить конфиг обрывом
 записи нельзя.
 
 Steam ищется через реестр (`HKCU\Software\Valve\Steam`, значение `SteamPath`);
 при необходимости путь задаётся флагом `--steam-path`.
 
-## 👨‍💻 Разработка
+## Разработка
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
@@ -133,6 +133,6 @@ python metagrid.py --dry-run --verbose
 На Linux/macOS для разработки Steam ищется в `~/.steam/steam` и
 `~/.local/share/Steam`.
 
-## 📄 Лицензия
+## Лицензия
 
 [MIT](LICENSE)
