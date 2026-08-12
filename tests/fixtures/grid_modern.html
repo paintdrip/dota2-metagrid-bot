@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>Meta Hero Grids — Dota 2 Pro Tracker</title></head>
+<body>
+<div id="svelte">
+<script>
+    {
+        const element = document.currentScript.parentElement;
+        Promise.all([
+            import("./_app/immutable/entry/start.ABC123.js"),
+            import("./_app/immutable/entry/app.DEF456.js")
+        ]).then(([kit, app]) => {
+            kit.start(app, element, {
+                node_ids: [0, 74],
+                data: [{type:"data",data:{grids:{matches:{configs:[{config_name:"Overview",categories:[{category_name:"Carry",x_position:0,y_position:0,width:100,height:100,hero_ids:[1,2,3]}]}]},matches_wr:{configs:[{config_name:"Overview",categories:[{category_name:"Carry",x_position:0,y_position:0,width:100,height:100,hero_ids:[4,5,6]}]}]},d2ptrating:{configs:[{config_name:"D2PT Rating",categories:[{category_name:"Core",x_position:0,y_position:0,width:240,height:120,hero_ids:[74,11,50,void 0]},{category_name:"Support",x_position:250,y_position:0,width:240,height:120,hero_ids:[20,26,101]}]}],version:3}},updated_at:1723400000,error:undefined,score:NaN},uses:{params:["mode"],parent:1,route:1}}],
+                form: null,
+                error: null
+            });
+        });
+    }
+</script>
+</div>
+</body>
+</html>

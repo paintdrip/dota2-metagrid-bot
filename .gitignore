@@ -1,0 +1,17 @@
+# Рабочие заметки заказчика — не публиковать
+work.md
+
+# Локальные копии конфига игры — не публиковать
+hero_grid_config.json
+hero_grid_config_backup.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Сборка
+build/
+dist/
+*.spec
