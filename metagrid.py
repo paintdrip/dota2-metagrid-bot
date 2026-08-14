@@ -62,25 +62,32 @@ def fetch_html_cffi(url: str, verbose: bool = False) -> str:
     return html
 
 
-def _chrome_candidates() -> list[str]:
-    """Возможные пути к Chrome/Chromium/Edge на текущей платформе."""
+def _browser_candidates(os_name: str | None = None) -> list[str]:
+    """Возможные пути к браузеру на текущей платформе.
+
+    Приоритет — Microsoft Edge: он предустановлен на всех Windows 10/11.
+    Edge — Chromium, поэтому headless-флаги у него те же, что у Chrome.
+    Firefox не подходит: headless-режима с выгрузкой DOM у него нет.
+    """
+    if os_name is None:
+        os_name = os.name
     candidates: list[str] = []
-    if os.name == "nt":
+    if os_name == "nt":
         prefixes = [
-            os.environ.get("PROGRAMFILES", r"C:\Program Files"),
             os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+            os.environ.get("PROGRAMFILES", r"C:\Program Files"),
             os.environ.get("LOCALAPPDATA", ""),
         ]
         rels = [
-            r"Google\Chrome\Application\chrome.exe",
             r"Microsoft\Edge\Application\msedge.exe",
+            r"Google\Chrome\Application\chrome.exe",
         ]
-        candidates.extend(os.path.join(p, r) for p in prefixes if p for r in rels)
-        # Путь из реестра: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe
+        candidates.extend(p + "\\" + r for p in prefixes if p for r in rels)
+        # Путь из реестра: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe
         try:
             import winreg
 
-            for exe in ("chrome.exe", "msedge.exe"):
+            for exe in ("msedge.exe", "chrome.exe"):
                 try:
                     with winreg.OpenKey(
                         winreg.HKEY_LOCAL_MACHINE,
@@ -92,7 +99,7 @@ def _chrome_candidates() -> list[str]:
         except ImportError:
             pass
     else:
-        for name in ("google-chrome", "chrome", "chromium", "chromium-browser", "microsoft-edge"):
+        for name in ("microsoft-edge", "google-chrome", "chrome", "chromium", "chromium-browser"):
             path = shutil.which(name)
             if path:
                 candidates.append(path)
@@ -106,32 +113,32 @@ def _chrome_candidates() -> list[str]:
     return result
 
 
-def find_chrome() -> str:
-    """Найти установленный Chrome (или Edge как запасной вариант)."""
-    candidates = _chrome_candidates()
+def find_browser() -> str:
+    """Найти установленный браузер для headless-рендера (Edge в приоритете)."""
+    candidates = _browser_candidates()
     if not candidates:
         raise MetaGridError(
-            "Не найден Google Chrome. Установите Chrome — он нужен для обхода "
-            "защиты Cloudflare, когда прямой запрос заблокирован."
+            "Не найден ни Microsoft Edge, ни Google Chrome. Один из них нужен "
+            "для обхода защиты Cloudflare, когда прямой запрос заблокирован."
         )
     return candidates[0]
 
 
-def fetch_html_chrome(url: str, verbose: bool = False) -> str:
-    """Запасной путь: рендер страницы headless Chrome с временным профилем.
+def fetch_html_browser(url: str, verbose: bool = False) -> str:
+    """Запасной путь: рендер страницы headless-браузером с временным профилем.
 
     Профиль сохраняется между попытками — кука cf_clearance, полученная на
     первой попытке, помогает на следующих.
     """
-    chrome = find_chrome()
-    profile = tempfile.mkdtemp(prefix="metagrid-chrome-")
+    browser = find_browser()
+    profile = tempfile.mkdtemp(prefix="metagrid-browser-")
     last_error = "неизвестная ошибка"
     try:
         for attempt in range(1, CHROME_ATTEMPTS + 1):
             if verbose:
-                print(f"[chrome] попытка {attempt}/{CHROME_ATTEMPTS}: {chrome}")
+                print(f"[browser] попытка {attempt}/{CHROME_ATTEMPTS}: {browser}")
             cmd = [
-                chrome,
+                browser,
                 "--headless=new",
                 "--disable-gpu",
                 "--no-first-run",
@@ -152,24 +159,24 @@ def fetch_html_chrome(url: str, verbose: bool = False) -> str:
             html = proc.stdout or ""
             if _validate_html(html):
                 if verbose:
-                    print(f"[chrome] получено {len(html)} байт")
+                    print(f"[browser] получено {len(html)} байт")
                 return html
             last_error = "ответ не похож на страницу (возможно, Cloudflare challenge)"
             time.sleep(2)
     finally:
         shutil.rmtree(profile, ignore_errors=True)
-    raise MetaGridError(f"Chrome headless: не удалось получить страницу ({last_error})")
+    raise MetaGridError(f"Headless-браузер: не удалось получить страницу ({last_error})")
 
 
 def fetch_html(url: str, verbose: bool = False) -> str:
-    """Скачать HTML страницы: сначала curl_cffi, при неудаче — headless Chrome."""
+    """Скачать HTML страницы: сначала curl_cffi, при неудаче — headless-браузер."""
     try:
         return fetch_html_cffi(url, verbose)
     except MetaGridError as exc:
         if verbose:
             print(f"[fetch] прямой запрос не сработал: {exc}")
-            print("[fetch] переключаюсь на headless Chrome...")
-        return fetch_html_chrome(url, verbose)
+            print("[fetch] переключаюсь на headless-браузер (Edge/Chrome)...")
+        return fetch_html_browser(url, verbose)
 
 
 # ---------------------------------------------------------------------------
