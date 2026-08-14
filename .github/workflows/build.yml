@@ -25,14 +25,21 @@ jobs:
       - name: Build exe
         run: pyinstaller --onefile --name dota2-metagrid metagrid.py
 
+      - name: Copy remove-autostart.bat to dist
+        run: copy remove-autostart.bat dist\
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dota2-metagrid-windows
-          path: dist/dota2-metagrid.exe
+          path: |
+            dist/dota2-metagrid.exe
+            dist/remove-autostart.bat
 
       - name: Release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/dota2-metagrid.exe
+          files: |
+            dist/dota2-metagrid.exe
+            dist/remove-autostart.bat
