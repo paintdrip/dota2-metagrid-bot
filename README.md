@@ -8,15 +8,7 @@
 <Steam>/userdata/<steam_account_id>/570/remote/cfg/hero_grid_config.json
 ```
 
-Сетка обновляется на сайте ежедневно — утилита предназначена для запуска из
-автозагрузки, чтобы в игре всегда была актуальная мета.
-
-Источник данных: [dota2protracker.com](https://dota2protracker.com) — спасибо
-авторам сайта за их работу.
-
 ## Установка
-
-### Готовый .exe (рекомендуется)
 
 1. Скачайте `dota2-metagrid.exe` из раздела
    [Releases](https://github.com/paintdrip/dota2-metagrid-bot/releases).
@@ -30,43 +22,15 @@
    dota2-metagrid.exe --install
    ```
 
-### Сборка самостоятельно
+## Как это работает
 
-Требуется Python 3.10+ и установленный Google Chrome (см. ниже).
+Утилита живёт в автозагрузке Windows и раз в день автоматически:
 
-```bat
-git clone https://github.com/paintdrip/dota2-metagrid-bot.git
-cd dota2-metagrid-bot
-build.bat
-```
+- заходит на Dota2ProTracker и забирает свежую сетку (рейтинг D2PT)
+- находит на компьютере Steam и папку с конфигами доты
+- записывает сетку в `hero_grid_config.json` — для всех аккаунтов сразу
 
-Готовый файл появится в `dist\dota2-metagrid.exe`.
-
-Запуск из исходников без сборки:
-
-```bat
-pip install -r requirements.txt
-python metagrid.py
-```
-
-## Использование
-
-```
-dota2-metagrid.exe                один прогон обновления с выводом прогресса
-dota2-metagrid.exe --auto         тихий режим для автозагрузки: пропуск, если
-                                  сетка обновлялась менее 20 часов назад
-dota2-metagrid.exe --auto --force игнорировать проверку 20 часов
-dota2-metagrid.exe --dry-run      скачать и распарсить сетку, не трогая конфиг
-dota2-metagrid.exe --install      создать задачи в Планировщике (автозагрузка)
-dota2-metagrid.exe --uninstall    удалить задачи из Планировщика
-dota2-metagrid.exe --mode matches_wr   другой режим выбора героев
-dota2-metagrid.exe --steam-path "D:\Steam"   указать Steam вручную
-dota2-metagrid.exe --user-id 123456789      обновить только один аккаунт
-dota2-metagrid.exe --verbose      подробный вывод
-```
-
-Коды возврата: `0` — успех (включая пропуск в `--auto`), `1` — ошибка
-(сообщение выводится на русском в stderr).
+Дальше просто заходишь в доту, а в драфте уже актуальная мета: общая сетка «All Roles» и отдельные сетки на Carry, Mid, Offlane, Support и Hard Support.
 
 ## Автозагрузка
 
