@@ -427,6 +427,42 @@ def _run_command_line() -> str:
     return f'"{sys.executable}" "{os.path.abspath(__file__)}"'
 
 
+def autorun_tasks_exist() -> bool:
+    """True, если задачи автозагрузки уже созданы в Планировщике (только Windows)."""
+    if os.name != "nt":
+        return False
+    proc = subprocess.run(
+        ["schtasks", "/Query", "/TN", TASK_LOGON], capture_output=True
+    )
+    return proc.returncode == 0
+
+
+def maybe_offer_autorun(interactive: bool, is_windows: bool | None = None) -> None:
+    """Предложить добавить утилиту в автозагрузку.
+
+    Только при интерактивном запуске без аргументов (двойной клик по exe),
+    на Windows и если задачи ещё не созданы.
+    """
+    if not interactive:
+        return
+    if is_windows is None:
+        is_windows = os.name == "nt"
+    if not is_windows:
+        return
+    if autorun_tasks_exist():
+        return
+    try:
+        answer = input("Добавить в автозагрузку, чтобы сетка обновлялась каждый день? [Y/n]: ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if answer.strip().lower() in ("", "y", "yes", "д", "да"):
+        try:
+            install_autorun()
+        except (MetaGridError, subprocess.CalledProcessError) as exc:
+            print(f"Не удалось добавить в автозагрузку: {exc}", file=sys.stderr)
+
+
 def install_autorun() -> None:
     if os.name != "nt":
         raise MetaGridError("--install поддерживается только на Windows.")
@@ -519,6 +555,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_args = sys.argv[1:] if argv is None else argv
+    # Интерактивный запуск: без аргументов и с живой консолью (двойной клик по exe)
+    interactive = not raw_args and sys.stdin.isatty()
     args = build_parser().parse_args(argv)
     try:
         if args.install:
@@ -528,6 +567,8 @@ def main(argv: list[str] | None = None) -> int:
             uninstall_autorun()
             return 0
         run_update(args)
+        if interactive:
+            maybe_offer_autorun(interactive)
         return 0
     except MetaGridError as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)
@@ -538,6 +579,13 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Прервано пользователем.", file=sys.stderr)
         return 1
+    finally:
+        # Пауза, чтобы окно консоли не закрылось мгновенно при двойном клике
+        if interactive:
+            try:
+                input("Нажмите Enter для выхода...")
+            except (EOFError, KeyboardInterrupt):
+                pass
 
 
 if __name__ == "__main__":
