@@ -8,8 +8,8 @@
 <Steam>/userdata/<steam_account_id>/570/remote/cfg/hero_grid_config.json
 ```
 
-![preview-1](https://ibb.co/KzGQJZV0)
-![preview-2](https://ibb.co/v4kZ88kX)
+![preview-1](https://i.ibb.co/r2H4JJHd/maket-mid.jpg)
+![preview-2](https://i.ibb.co/DHT6jcDv/maket-vse-roli-1.jpg)
 
 ## Установка
 
