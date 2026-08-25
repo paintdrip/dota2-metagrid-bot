@@ -420,6 +420,14 @@ def should_skip(path: Path, hours: float = AUTO_SKIP_HOURS, now: float | None = 
 # Автозагрузка Windows (Планировщик задач)
 # ---------------------------------------------------------------------------
 
+# Переменная окружения, через которую повышенной копии передаётся исходный пользователь
+ELEVATED_ENV_VAR = "METAGRID_INSTALL_USER"
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def _run_command_line() -> str:
     """Команда, которой запускать утилиту из Планировщика."""
     if getattr(sys, "frozen", False):
@@ -429,7 +437,7 @@ def _run_command_line() -> str:
 
 def autorun_tasks_exist() -> bool:
     """True, если задачи автозагрузки уже созданы в Планировщике (только Windows)."""
-    if os.name != "nt":
+    if not _is_windows():
         return False
     proc = subprocess.run(
         ["schtasks", "/Query", "/TN", TASK_LOGON], capture_output=True
@@ -446,7 +454,7 @@ def maybe_offer_autorun(interactive: bool, is_windows: bool | None = None) -> No
     if not interactive:
         return
     if is_windows is None:
-        is_windows = os.name == "nt"
+        is_windows = _is_windows()
     if not is_windows:
         return
     if autorun_tasks_exist():
@@ -463,24 +471,111 @@ def maybe_offer_autorun(interactive: bool, is_windows: bool | None = None) -> No
             print(f"Не удалось добавить в автозагрузку: {exc}", file=sys.stderr)
 
 
-def install_autorun() -> None:
-    if os.name != "nt":
-        raise MetaGridError("--install поддерживается только на Windows.")
-    run = _run_command_line()
+def _task_commands(run: str, user: str | None = None) -> list[tuple[str, list[str]]]:
+    """Команды schtasks для обеих задач.
+
+    С user — добавляются /RU <user> /RL LIMITED (режим --install-elevated:
+    задача привязывается к обычному пользователю, а не к админскому контексту).
+    """
     tasks = [
         (TASK_LOGON, ["/SC", "ONLOGON"]),
         (TASK_DAILY, ["/SC", "DAILY", "/ST", "12:00"]),
     ]
+    cmds: list[tuple[str, list[str]]] = []
     for name, schedule in tasks:
-        cmd = ["schtasks", "/Create", "/TN", name, *schedule, "/TR", f"{run} --auto", "/F"]
-        subprocess.run(cmd, check=True)
+        cmd = ["schtasks", "/Create", "/TN", name, *schedule, "/TR", f"{run} --auto"]
+        if user:
+            cmd += ["/RU", user, "/RL", "LIMITED"]
+        cmd.append("/F")
+        cmds.append((name, cmd))
+    return cmds
+
+
+def _is_access_denied(proc: subprocess.CompletedProcess) -> bool:
+    """True, если schtasks упал с ошибкой доступа (ru/en, любая кодировка консоли)."""
+    if proc.returncode == 0:
+        return False
+    out = (proc.stdout or b"") + (proc.stderr or b"")
+    if isinstance(out, bytes):
+        # Консоль Windows может отвечать в OEM (cp866) или ANSI (cp1251) —
+        # декодируем во всех вариантах и ищем без учёта регистра.
+        variants = [out.decode(enc, errors="replace") for enc in ("utf-8", "cp866", "cp1251")]
+    else:
+        variants = [out]
+    low = " ".join(variants).lower()
+    return "access is denied" in low or "отказано в доступе" in low
+
+
+def _current_user() -> str:
+    """DOMAIN\\user текущего пользователя из переменных окружения."""
+    user = os.environ.get("USERNAME", "")
+    domain = os.environ.get("USERDOMAIN", "")
+    return f"{domain}\\{user}" if domain and user else user
+
+
+def _relaunch_elevated() -> None:
+    """Перезапустить утилиту с правами администратора (UAC) для установки задач.
+
+    Исходный интерактивный пользователь прокидывается через переменную
+    окружения ELEVATED_ENV_VAR — дочерний процесс её наследует.
+    """
+    import ctypes
+
+    os.environ[ELEVATED_ENV_VAR] = _current_user()
+    if getattr(sys, "frozen", False):
+        params = "--install-elevated"
+    else:
+        params = f'"{os.path.abspath(__file__)}" --install-elevated'
+    # ShellExecuteW с глаголом "runas" показывает окно UAC
+    rc = ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, params, None, 1
+    )
+    if rc <= 32:  # SE_ERR_ACCESSDENIED=5 (отказ в UAC) и прочие ошибки запуска
+        raise MetaGridError(
+            "Права администратора не получены (в окне UAC нажата «Нет»?). "
+            "Автозагрузка НЕ установлена — можно повторить позже: "
+            "dota2-metagrid.exe --install"
+        )
+    print("Открыто окно с правами администратора — установка продолжается в нём.")
+
+
+def install_autorun() -> None:
+    """Создать задачи автозагрузки; при нехватке прав — повтор через UAC."""
+    if not _is_windows():
+        raise MetaGridError("--install поддерживается только на Windows.")
+    for name, cmd in _task_commands(_run_command_line()):
+        proc = subprocess.run(cmd, capture_output=True)
+        if _is_access_denied(proc):
+            print("Недостаточно прав — запрашиваю права администратора (окно UAC)...")
+            _relaunch_elevated()
+            return
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or b"").decode(errors="replace").strip()
+            raise MetaGridError(f"schtasks вернул ошибку {proc.returncode}: {detail}")
         print(f"Создана задача Планировщика: {name}")
     print("Готово. Сетка будет обновляться при входе в систему и ежедневно в 12:00.")
     print("(Повторные запуски в течение 20 часов пропускаются автоматически.)")
 
 
+def install_autorun_elevated() -> None:
+    """Режим --install-elevated: создание задач из повышенного процесса.
+
+    Задачи создаются с /RU <исходный пользователь> /RL LIMITED, чтобы они
+    работали от обычного юзера, а не от админского контекста.
+    """
+    if not _is_windows():
+        raise MetaGridError("--install-elevated поддерживается только на Windows.")
+    user = os.environ.get(ELEVATED_ENV_VAR) or _current_user()
+    for name, cmd in _task_commands(_run_command_line(), user=user):
+        subprocess.run(cmd, check=True)
+        print(f"Создана задача Планировщика: {name} (пользователь: {user})")
+    print("Готово. Сетка будет обновляться при входе в систему и ежедневно в 12:00.")
+    print("(Повторные запуски в течение 20 часов пропускаются автоматически.)")
+
+
 def uninstall_autorun() -> None:
-    if os.name != "nt":
+    # Удаление задач текущего пользователя прав администратора не требует
+    if not _is_windows():
         raise MetaGridError("--uninstall поддерживается только на Windows.")
     for name in (TASK_LOGON, TASK_DAILY):
         proc = subprocess.run(
@@ -544,6 +639,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="игнорировать дедупликацию в режиме --auto")
     parser.add_argument("--install", action="store_true",
                         help="добавить задачи в Планировщик задач Windows (автозагрузка)")
+    # Скрытый флаг: служебный режим, вызывается только повышенной копией через UAC
+    parser.add_argument("--install-elevated", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--uninstall", action="store_true",
                         help="удалить задачи из Планировщика задач Windows")
     parser.add_argument("--dry-run", action="store_true",
@@ -559,7 +656,12 @@ def main(argv: list[str] | None = None) -> int:
     # Интерактивный запуск: без аргументов и с живой консолью (двойной клик по exe)
     interactive = not raw_args and sys.stdin.isatty()
     args = build_parser().parse_args(argv)
+    # Повышенная копия запущена в новом окне — пауза в конце, чтобы юзер увидел результат
+    pause_at_end = interactive or args.install_elevated
     try:
+        if args.install_elevated:
+            install_autorun_elevated()
+            return 0
         if args.install:
             install_autorun()
             return 0
@@ -581,7 +683,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     finally:
         # Пауза, чтобы окно консоли не закрылось мгновенно при двойном клике
-        if interactive:
+        if pause_at_end:
             try:
                 input("Нажмите Enter для выхода...")
             except (EOFError, KeyboardInterrupt):
