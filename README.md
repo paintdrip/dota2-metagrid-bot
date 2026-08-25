@@ -34,9 +34,17 @@
 
 Дальше просто заходишь в доту, а в драфте уже актуальная мета: общая сетка «All Roles» и отдельные сетки на Carry, Mid, Offlane, Support и Hard Support.
 
-![preview-1](https://i.ibb.co/JjwqNcVz/Screenshot-1.png)
-![preview-2](https://i.ibb.co/SXFrFX3X/Screenshot-2-1.png)
-![preview-3](https://i.ibb.co/fYTR3Xkv/Screenshot-3-1.png)
+<p align="center">
+  <img src="https://i.ibb.co/JjwqNcVz/Screenshot-1.png" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://i.ibb.co/SXFrFX3X/Screenshot-2-1.png" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://i.ibb.co/fYTR3Xkv/Screenshot-3-1.png" width="100%">
+</p>
 
 ## Автозагрузка
 
