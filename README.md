@@ -1,15 +1,12 @@
 # dota2-metagrid-bot
 
-Терминальная утилита для Windows, которая ежедневно скачивает метовую сетку
+Терминальная утилита для Windows, которая ежедневно скачивает прямо в доту метовую сетку
 героев Dota 2 с [dota2protracker.com/meta-hero-grids](https://dota2protracker.com/meta-hero-grids)
 (режим **D2PT Rating**) и записывает её в конфиг игры:
 
 ```
 <Steam>/userdata/<steam_account_id>/570/remote/cfg/hero_grid_config.json
 ```
-
-![preview-1](https://i.ibb.co/r2H4JJHd/maket-mid.jpg)
-![preview-2](https://i.ibb.co/DHT6jcDv/maket-vse-roli-1.jpg)
 
 ## Установка
 
@@ -36,6 +33,10 @@
 - записывает сетку в `hero_grid_config.json` — для всех аккаунтов сразу
 
 Дальше просто заходишь в доту, а в драфте уже актуальная мета: общая сетка «All Roles» и отдельные сетки на Carry, Mid, Offlane, Support и Hard Support.
+
+![preview-1](https://i.ibb.co/JjwqNcVz/Screenshot-1.png)
+![preview-2](https://i.ibb.co/SXFrFX3X/Screenshot-2-1.png)
+![preview-3](https://i.ibb.co/fYTR3Xkv/Screenshot-3-1.png)
 
 ## Автозагрузка
 
