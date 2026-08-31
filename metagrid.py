@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import logging.handlers
 import os
 import re
 import shutil
@@ -25,8 +27,15 @@ AUTO_SKIP_HOURS = 20
 CHROME_ATTEMPTS = 3
 CHROME_TIMEOUT = 120  # секунд на одну попытку headless-рендера
 STATE_DIR_NAME = "dota2-metagrid"
+LOG_FILE_NAME = "metagrid.log"
+LOG_MAX_BYTES = 1_000_000  # ~1 МБ на файл, всего 2 файла (текущий + 1 архивный)
+MIN_TOTAL_HEROES = 50  # суммарно hero_ids во всех категориях — sanity check
 TASK_LOGON = "Dota2MetaGrid-Logon"
 TASK_DAILY = "Dota2MetaGrid-Daily"
+SUPPORT_HINT = ("Если проблема повторяется — пришлите файл metagrid.log разработчикам: "
+                "github.com/paintdrip/dota2-metagrid-bot/issues")
+
+log = logging.getLogger("metagrid")
 
 
 class MetaGridError(Exception):
@@ -131,6 +140,7 @@ def fetch_html_browser(url: str, verbose: bool = False) -> str:
     первой попытке, помогает на следующих.
     """
     browser = find_browser()
+    log.info("Headless-браузер: %s", browser)
     profile = tempfile.mkdtemp(prefix="metagrid-browser-")
     last_error = "неизвестная ошибка"
     try:
@@ -171,12 +181,17 @@ def fetch_html_browser(url: str, verbose: bool = False) -> str:
 def fetch_html(url: str, verbose: bool = False) -> str:
     """Скачать HTML страницы: сначала curl_cffi, при неудаче — headless-браузер."""
     try:
-        return fetch_html_cffi(url, verbose)
+        html = fetch_html_cffi(url, verbose)
+        log.info("Страница получена через curl_cffi (%d байт)", len(html))
+        return html
     except MetaGridError as exc:
+        log.info("curl_cffi не сработал (%s), переключаюсь на headless-браузер", exc)
         if verbose:
             print(f"[fetch] прямой запрос не сработал: {exc}")
             print("[fetch] переключаюсь на headless-браузер (Edge/Chrome)...")
-        return fetch_html_browser(url, verbose)
+        html = fetch_html_browser(url, verbose)
+        log.info("Страница получена через headless-браузер (%d байт)", len(html))
+        return html
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +322,96 @@ def parse_grid_from_html(html: str, mode: str = DEFAULT_MODE) -> dict:
     return pick_grid(container["grids"], mode)
 
 
+def validate_grid(grid: dict) -> None:
+    """Проверить структуру сетки перед записью (fail fast, ошибка на русском).
+
+    Клиент Dota 2 молча игнорирует битый hero_grid_config.json, поэтому
+    невалидную структуру нельзя писать в файл.
+    """
+    problems: list[str] = []
+    configs = grid.get("configs") if isinstance(grid, dict) else None
+    if not isinstance(configs, list) or not configs:
+        problems.append("нет непустого списка configs")
+    else:
+        total_heroes = 0
+        non_empty_categories = 0
+        for i, config in enumerate(configs):
+            if not isinstance(config, dict):
+                problems.append(f"configs[{i}] — не объект")
+                continue
+            if not isinstance(config.get("config_name"), str) or not config["config_name"]:
+                problems.append(f"configs[{i}]: нет строкового config_name")
+            categories = config.get("categories")
+            if not isinstance(categories, list) or not categories:
+                problems.append(f"configs[{i}] ({config.get('config_name', '?')}): "
+                                "нет непустого списка categories")
+                continue
+            for j, category in enumerate(categories):
+                if not isinstance(category, dict):
+                    problems.append(f"configs[{i}].categories[{j}] — не объект")
+                    continue
+                if not isinstance(category.get("category_name"), str):
+                    problems.append(f"configs[{i}].categories[{j}]: нет строкового category_name")
+                hero_ids = category.get("hero_ids")
+                if not isinstance(hero_ids, list):
+                    problems.append(f"configs[{i}].categories[{j}] "
+                                    f"({category.get('category_name', '?')}): hero_ids — не список")
+                    continue
+                bad = [h for h in hero_ids if not isinstance(h, int) or isinstance(h, bool) or h <= 0]
+                if bad:
+                    problems.append(f"configs[{i}].categories[{j}] "
+                                    f"({category.get('category_name', '?')}): "
+                                    f"невалидные hero_ids: {bad[:5]}")
+                if hero_ids:
+                    non_empty_categories += 1
+                total_heroes += len(hero_ids)
+        if configs and non_empty_categories == 0:
+            problems.append("все категории пусты (ни одного hero_id)")
+        if not problems and total_heroes < MIN_TOTAL_HEROES:
+            problems.append(f"подозрительно мало героев суммарно: {total_heroes} "
+                            f"(ожидается не менее {MIN_TOTAL_HEROES}) — похоже на обрезанные данные")
+    if problems:
+        details = "; ".join(problems[:10])
+        raise MetaGridError(
+            f"Извлечённая сетка невалидна и НЕ была записана: {details}. "
+            f"Сайт мог изменить формат данных. {SUPPORT_HINT}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Проверка, запущена ли Dota 2
+# ---------------------------------------------------------------------------
+
+def _is_dota_running_linux(proc_root: str = "/proc") -> bool:
+    """Поиск процесса dota2 по /proc (для разработки и тестов на Linux)."""
+    for comm in Path(proc_root).glob("[0-9]*/comm"):
+        try:
+            if comm.read_text(errors="replace").strip() == "dota2":
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def is_dota_running() -> bool:
+    """True, если запущен клиент Dota 2 (dota2.exe / dota2)."""
+    if _is_windows():
+        try:
+            proc = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq dota2.exe", "/NH"],
+                capture_output=True, timeout=15,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            log.warning("Не удалось проверить запущенные процессы (tasklist)")
+            return False
+        out = proc.stdout or b""
+        # Ответ может быть в OEM-кодировке — имя процесса ASCII, ищем по байтам
+        return b"dota2.exe" in out.lower()
+    if os.name == "posix":
+        return _is_dota_running_linux()
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Steam / запись конфига
 # ---------------------------------------------------------------------------
@@ -337,18 +442,58 @@ def find_steam_path(override: str | None = None) -> Path:
 
 
 def find_cfg_dirs(steam_path: Path, user_id: str | None = None) -> list[Path]:
-    """Найти директории cfg всех аккаунтов (userdata/<id>/570/remote/cfg)."""
+    """Найти директории cfg аккаунтов (userdata/<id>/570/remote/cfg).
+
+    Берём только числовые папки реальных аккаунтов: служебные "0", "ac",
+    "anonymous" и прочие нечисловые пропускаем.
+    """
     userdata = steam_path / "userdata"
     if not userdata.is_dir():
         raise MetaGridError(
             f"В {steam_path} нет директории userdata — Dota 2 ни разу не запускалась?"
         )
-    ids = [user_id] if user_id else [
-        d.name for d in sorted(userdata.iterdir()) if d.is_dir() and d.name.isdigit()
-    ]
+    if user_id:
+        ids = [user_id]
+    else:
+        ids = []
+        for d in sorted(userdata.iterdir()):
+            if not d.is_dir():
+                continue
+            if d.name.isdigit() and d.name != "0":
+                ids.append(d.name)
+            else:
+                log.info("userdata: пропускаю служебную папку %s", d.name)
     if not ids:
         raise MetaGridError(f"В {userdata} не найдено ни одного аккаунта (числовых папок).")
+    for uid in ids:
+        log.info("Найден аккаунт Steam: %s", uid)
     return [userdata / uid / "570" / "remote" / "cfg" for uid in ids]
+
+
+def verify_written_config(target: Path, grid: dict) -> None:
+    """Пост-валидация: перечитать записанный файл и сравнить с тем, что писали."""
+    try:
+        written = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MetaGridError(
+            f"Записанный файл {target} не читается как JSON: {exc}. {SUPPORT_HINT}"
+        ) from exc
+    if written.get("configs") != grid.get("configs"):
+        raise MetaGridError(
+            f"Файл {target} после записи не совпадает с тем, что записывалось "
+            f"(кто-то перезаписал файл?). {SUPPORT_HINT}"
+        )
+
+
+def grid_summary(grid: dict) -> list[str]:
+    """Строки сводки по конфигам: имя, число категорий и героев."""
+    lines = []
+    for config in grid.get("configs", []):
+        categories = config.get("categories", [])
+        heroes = sum(len(c.get("hero_ids", [])) for c in categories)
+        lines.append(f'{config.get("config_name", "?")}: '
+                     f'{len(categories)} категорий, {heroes} героев')
+    return lines
 
 
 def write_grid_config(cfg_dir: Path, grid: dict, verbose: bool = False) -> Path:
@@ -387,6 +532,30 @@ def state_file_path() -> Path:
     if os.name == "nt" and localappdata:
         return Path(localappdata) / STATE_DIR_NAME / "state.json"
     return Path.home() / ".local" / "state" / STATE_DIR_NAME / "state.json"
+
+
+def setup_logging(log_path: Path | None = None, verbose: bool = False) -> Path:
+    """Настроить лог прогона: metagrid.log рядом с state.json, с ротацией.
+
+    Уровень INFO, при --verbose — DEBUG. Ротация: ~1 МБ на файл, 2 файла всего.
+    """
+    if log_path is None:
+        log_path = state_file_path().parent / LOG_FILE_NAME
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log.setLevel(logging.DEBUG if verbose else logging.INFO)
+    log.propagate = False
+    for handler in list(log.handlers):
+        log.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
+    handler = logging.handlers.RotatingFileHandler(
+        log_path, maxBytes=LOG_MAX_BYTES, backupCount=1, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    log.addHandler(handler)
+    return log_path
 
 
 def read_last_success(path: Path) -> float | None:
@@ -597,31 +766,51 @@ def run_update(args: argparse.Namespace) -> None:
         last = read_last_success(state_path)
         when = time.strftime("%d.%m.%Y %H:%M", time.localtime(last)) if last else "?"
         print(f"Пропуск: сетка уже обновлялась {when} (менее {AUTO_SKIP_HOURS} ч назад).")
+        log.info("Пропуск: последнее успешное обновление %s", when)
         return
 
     print(f"Скачиваю метовую сетку с {URL} ...")
+    log.info("Скачиваю %s (режим: %s)", URL, args.mode)
     html = fetch_html(URL, verbose=args.verbose)
 
     print(f"Извлекаю сетку (режим: {args.mode}) ...")
     grid = parse_grid_from_html(html, mode=args.mode)
-    configs = grid.get("configs", [])
-    total_heroes = sum(len(c.get("hero_ids", [])) for c in configs)
-    print(f"Сетка получена: {len(configs)} категорий, {total_heroes} hero_ids.")
+    validate_grid(grid)
+    for line in grid_summary(grid):
+        print(f"  {line}")
+        log.info("Сетка: %s", line)
 
     if args.dry_run:
         print("Режим --dry-run: конфиг игры НЕ изменялся.")
+        log.info("dry-run: запись пропущена")
         return
 
+    # Клиент Dota 2 перезаписывает hero_grid_config.json при выходе из игры —
+    # запись при запущенной игре бесполезна (файл затрётся старой версией)
+    if is_dota_running():
+        message = ("Dota 2 сейчас запущена. Игра перезаписывает hero_grid_config.json "
+                   "при выходе — обновлённая сетка затрётся. Закройте Dota 2 полностью "
+                   "и запустите утилиту ещё раз (либо используйте --force на свой риск).")
+        if not args.force:
+            log.error("Dota 2 запущена — запись отменена")
+            raise MetaGridError(message)
+        print(f"ВНИМАНИЕ: {message}")
+        log.warning("Dota 2 запущена, но запись разрешена флагом --force")
+
     steam_path = find_steam_path(args.steam_path)
+    log.info("Путь Steam: %s", steam_path)
     if args.verbose:
         print(f"[steam] путь: {steam_path}")
     cfg_dirs = find_cfg_dirs(steam_path, args.user_id)
     for cfg_dir in cfg_dirs:
         target = write_grid_config(cfg_dir, grid, verbose=args.verbose)
-        print(f"Записано: {target}")
+        verify_written_config(target, grid)
+        print(f"Записано и проверено: {target}")
+        log.info("Записано и проверено: %s", target)
 
     write_last_success(state_path)
-    print("Готово.")
+    print("Готово. Если Dota 2 была запущена — перезапустите игру, чтобы увидеть сетку.")
+    log.info("Обновление завершено успешно")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -636,7 +825,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="тихий режим для автозагрузки: пропуск, если обновлялись "
                              f"менее {AUTO_SKIP_HOURS} ч назад")
     parser.add_argument("--force", action="store_true",
-                        help="игнорировать дедупликацию в режиме --auto")
+                        help="игнорировать дедупликацию в режиме --auto и "
+                             "разрешить запись при запущенной Dota 2")
     parser.add_argument("--install", action="store_true",
                         help="добавить задачи в Планировщик задач Windows (автозагрузка)")
     # Скрытый флаг: служебный режим, вызывается только повышенной копией через UAC
@@ -656,6 +846,12 @@ def main(argv: list[str] | None = None) -> int:
     # Интерактивный запуск: без аргументов и с живой консолью (двойной клик по exe)
     interactive = not raw_args and sys.stdin.isatty()
     args = build_parser().parse_args(argv)
+    try:
+        setup_logging(verbose=args.verbose)
+        log.info("Запуск: %s", " ".join(raw_args) or "(без аргументов)")
+    except OSError as exc:
+        # Лог — вспомогательная вещь, без него работаем дальше
+        print(f"Предупреждение: не удалось открыть metagrid.log: {exc}", file=sys.stderr)
     # Повышенная копия запущена в новом окне — пауза в конце, чтобы юзер увидел результат
     pause_at_end = interactive or args.install_elevated
     try:
@@ -673,10 +869,15 @@ def main(argv: list[str] | None = None) -> int:
             maybe_offer_autorun(interactive)
         return 0
     except MetaGridError as exc:
+        log.error("%s", exc)
         print(f"Ошибка: {exc}", file=sys.stderr)
+        if SUPPORT_HINT not in str(exc):
+            print(SUPPORT_HINT, file=sys.stderr)
         return 1
     except subprocess.CalledProcessError as exc:
+        log.error("команда %s: %s", exc.cmd, exc)
         print(f"Ошибка: не удалось выполнить команду {exc.cmd}: {exc}", file=sys.stderr)
+        print(SUPPORT_HINT, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print("Прервано пользователем.", file=sys.stderr)
